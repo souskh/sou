@@ -1,0 +1,67 @@
+
+
+---
+
+- hosts: nouveaux
+  remote_user: root
+  
+  tasks:
+
+  - name: update Debian packages cache
+    apt: update_cache=yes cache_valid_time=3600
+  
+  - name: PKG debian-keyring is at the latest version
+    apt: pkg=debian-keyring state=latest
+
+  - name: PKG snmpd is at the latest version
+    apt: pkg=snmpd state=latest
+
+  - name: snmpd.conf file configuration
+    copy: content='rocommunity public <ipsuperviseur>' dest=/etc/snmp/snmpd.conf
+
+  - name: restart snmpd
+    service: name=snmpd state=restarted
+
+  - name: PKG nagios-plugins-standard is at the latest version
+    apt: pkg=nagios-plugins-standard state=latest
+
+  - name: User superviseur created
+    user: name=superviseur shell=/bin/bash
+
+  - name: Superviseur key deployed
+    authorized_key: user=superviseur key="{{ lookup('file', '~/GIT/ansible/ssh-key-superviseur.pub') }}"
+
+  - name: centreon add host
+    shell: /usr/share/centreon/www/modules/centreon-clapi/core/centreon -u admin -p admin -o HOST -a add -v "{{ inventory_hostname }};{{ inventory_hostname }};{{ ansible_default_ipv4.address }};generic-host;central;ALL_HOST"
+    delegate_to: superviseur.company.lan
+
+
+
+  - name: centreon add to group Debian Wheezy
+    shell: /usr/share/centreon/www/modules/centreon-clapi/core/centreon -u admin -p admin -o HG -a addmember -v "Debian-Wheezy;{{ inventory_hostname }}"
+    when: ansible_os_family == "Debian" and ansible_distribution_major_version == "7"
+    delegate_to: superviseur.company.lan
+  
+  - name: centreon add to group Debian Jessie
+    shell: /usr/share/centreon/www/modules/centreon-clapi/core/centreon -u admin -p admin -o HG -a addmember -v "Debian-Jessie;{{ inventory_hostname }}"
+    when: ansible_os_family == "Debian" and ansible_distribution_major_version == "8"
+    delegate_to: superviseur.company.lan
+
+  - name: centreon add to group Debian Jessie
+    shell: /usr/share/centreon/www/modules/centreon-clapi/core/centreon -u admin -p admin -o HOST -a addtemplate -v "{{ inventory_hostname }};Linux_template"
+    when: ansible_os_family == "Debian"
+    delegate_to: superviseur.company.lan
+
+  - name: Verification presence mysql-server
+    shell: dpkg-query -s mysql-server 2>&1 | grep "install ok installed" | wc -l
+    register: debian_check
+ 
+  - name: centreon add host template mysql-server
+    shell: /usr/share/centreon/www/modules/centreon-clapi/core/centreon -u admin -p admin -o HOST -a addtemplate -v "{{ inventory_hostname }};MySQL_template"
+    when: debian_check.stdout == "1"
+    delegate_to: superviseur.company.lan
+
+  - name: Deploy templates
+    shell: /usr/share/centreon/www/modules/centreon-clapi/core/centreon -u admin -p admin -o HOST -a applytpl -v "{{ inventory_hostname }}"
+    when: debian_check.stdout == "1"
+    delegate_to: centreon
